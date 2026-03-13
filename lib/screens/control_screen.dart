@@ -125,22 +125,35 @@ class _ControlScreenState extends State<ControlScreen> {
   }
 
   // ==================== 轨迹动作 ====================
-  // 通用轨迹执行器：按顺序发送路径点，每两点间等待 interval
-  Future<void> _playTrajectory(List<List<int>> waypoints, {int intervalMs = 800}) async {
+  // 通用轨迹执行器：按顺序发送路径点，并等待下位机回复运动完成通知，附带超时保护
+  Future<void> _playTrajectory(List<List<int>> waypoints, {int timeoutMs = 6000}) async {
     if (_isPlayingTrajectory || !mounted) return;
     setState(() => _isPlayingTrajectory = true);
+
+    final bleService = context.read<BleService>();
+    StreamSubscription<List<int>>? notifySub;
+    Completer<void>? moveCompleter;
+
+    // 监听底层发来的运动完成标志 0x01
+    notifySub = bleService.notifyStreamController.stream.listen((value) {
+      if (value.isNotEmpty && value[0] == 0x01) {
+        if (moveCompleter != null && !moveCompleter!.isCompleted) {
+          moveCompleter!.complete();
+        }
+      }
+    });
 
     try {
       for (var wp in waypoints) {
         if (!mounted) break; // 组件销毁（如按返回键）
         
         // 每次发包前检查底层连接是否存活
-        final bleService = context.read<BleService>();
         if (bleService.writeCharacteristic == null) {
           debugPrint("Trajectory aborted: BLE disconnected.");
           break;
         }
 
+        moveCompleter = Completer<void>();
         _sendAngles(wp[0], wp[1], wp[2], wp[3]);
         
         if (!mounted) break;
@@ -152,9 +165,14 @@ class _ControlScreenState extends State<ControlScreen> {
           _updateSeek3Limits(seek2Val);
         });
         
-        await Future.delayed(Duration(milliseconds: intervalMs));
+        // 关键：等待下位机跑完S曲线并发回0x01通知。若发生丢包，最多等待 timeoutMs 强制重置
+        await Future.any([
+          moveCompleter!.future,
+          Future.delayed(Duration(milliseconds: timeoutMs))
+        ]);
       }
     } finally {
+      notifySub?.cancel();
       // 使用 finally 确保就算发生异常，标志位也能释放
       if (mounted) {
         setState(() => _isPlayingTrajectory = false);

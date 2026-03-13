@@ -11,6 +11,7 @@ class BleService extends ChangeNotifier {
   BluetoothCharacteristic? writeCharacteristic;
   bool isScanning = false;
   int deviceMtu = 23;
+  final notifyStreamController = StreamController<List<int>>.broadcast();
   StreamSubscription<List<ScanResult>>? _scanSubscription;
   StreamSubscription<bool>? _isScanningSubscription;
   StreamSubscription<BluetoothConnectionState>? _connectionSubscription;
@@ -32,6 +33,7 @@ class BleService extends ChangeNotifier {
     _scanSubscription?.cancel();
     _isScanningSubscription?.cancel();
     _connectionSubscription?.cancel();
+    notifyStreamController.close();
     super.dispose();
   }
 
@@ -91,6 +93,7 @@ class BleService extends ChangeNotifier {
               await char.setNotifyValue(true);
               char.onValueReceived.listen((value) {
                 debugPrint("Notify: $value");
+                notifyStreamController.add(value);
               });
             }
             break;
