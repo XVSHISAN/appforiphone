@@ -1,0 +1,4 @@
+Analyzing appforiphone...                                       
+
+   info - Use 'const' with the constructor to improve performance - lib\screens\move_screen.dart:40:82 - prefer_const_constructors
+
